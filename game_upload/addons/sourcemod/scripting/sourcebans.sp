@@ -30,14 +30,9 @@
 
 #undef REQUIRE_PLUGIN
 #include <adminmenu>
-#tryinclude <updater>
 
 #define SB_VERSION "1.5.4.6F"
-#define SBR_VERSION "1.5.4.6"
-
-#if defined _updater_included
-#define UPDATE_URL "https://sarabveer.github.io/SourceBans-Fork/updater/updatefile.txt"
-#endif
+#define SBR_VERSION "1.5.5.0"
 
 //GLOBAL DEFINES
 #define YELLOW				0x01
@@ -65,7 +60,6 @@ new g_BanTime[MAXPLAYERS + 1] =  { -1, ... };
 
 new State:ConfigState;
 new Handle:ConfigParser;
-new Handle:updaterCvar = INVALID_HANDLE;
 new Handle:hTopMenu = INVALID_HANDLE;
 
 new const String:Prefix[] = "[SourceBans] ";
@@ -131,11 +125,11 @@ new serverID = -1;
 
 public Plugin:myinfo = 
 {
-	name = "SourceBans++", 
-	author = "SourceBans Development Team, Sarabveer(VEER™)", 
+	name = "SourceBans++ (GFL)", 
+	author = "SourceBans Development Team, Sarabveer(VEER™), N1ckles", 
 	description = "Advanced ban management for the Source engine", 
 	version = SBR_VERSION, 
-	url = "https://sarabveer.github.io/SourceBans-Fork/"
+	url = "https://github.com/N1ckles/sourcebans-pp"
 };
 
 #if SOURCEMOD_V_MAJOR >= 1 && SOURCEMOD_V_MINOR >= 3
@@ -226,33 +220,7 @@ public OnPluginStart()
 	{
 		AccountForLateLoading();
 	}
-	
-	#if defined _updater_included
-	if (LibraryExists("updater"))
-	{
-		Updater_AddPlugin(UPDATE_URL);
-	}
-	#endif
 }
-
-#if defined _updater_included
-public Action:Updater_OnPluginDownloading() {
-	if (!GetConVarBool(updaterCvar)) {
-		return Plugin_Handled;
-	}
-	return Plugin_Continue;
-}
-
-public OnLibraryAdded(const String:name[]) {
-	if (StrEqual(name, "updater")) {
-		Updater_AddPlugin(UPDATE_URL);
-	}
-}
-
-public Updater_OnPluginUpdated() {
-	ReloadPlugin();
-}
-#endif
 
 public OnAllPluginsLoaded()
 {
@@ -1761,8 +1729,81 @@ public AdminsDone(Handle:owner, Handle:hndl, const String:error[], any:data)
 	LogToFile(logFile, "Finished loading %i admins.", admCount);
 	#endif
 	
+	// GFL: Load perks
+	
+	decl String:query[1024];
+	FormatEx(query, sizeof(query), "SELECT steamid, groupid FROM %s_perks", DatabasePrefix);
+	SQL_TQuery(DB, PerksDone, query);
+}
+
+new String:GroupName[][] = {"Member", "Supporter", "VIP"};
+
+// GFL
+public PerksDone(Handle:owner, Handle:hndl, const String:error[], any:data){
+	if (hndl == INVALID_HANDLE || strlen(error) > 0)
+	{
+		--curLoading;
+		CheckLoadAdmins();
+		LogToFile(logFile, "Failed to retrieve perks from the database, %s", error);
+		return;
+	}
+	
+	int usersWithPerks = 0;
+	GroupId perkGroups[3];
+	for(int i = 0; i < 3; ++i){
+		perkGroups[i] = FindAdmGroup(GroupName[i]);
+		if(perkGroups[i] == INVALID_GROUP_ID){
+			--curLoading;
+			CheckLoadAdmins();
+			LogToFile(logFile, "Failed to find perk group: %s", GroupName[i]);
+			return;
+		}
+	}
+	
+	while (SQL_MoreRows(hndl))
+	{
+		SQL_FetchRow(hndl);
+		
+		if (SQL_IsFieldNull(hndl, 0))
+			continue; // Sometimes some rows return NULL due to some setups
+		
+		decl String:authid[66];
+		SQL_FetchString(hndl, 0, authid, sizeof(authid));
+		int groupid = SQL_FetchInt(hndl, 1) - 1;
+		if(groupid < 0 ||groupid > 2){
+			LogToFile(logFile, "Identity %s has invalid grupid (%d)", authid, groupid + 1);
+			continue;
+		}
+		
+		AdminId curAdm = INVALID_ADMIN_ID;
+		
+		// find or create the admin using that identity
+		if ((curAdm = FindAdminByIdentity("steam", authid)) == INVALID_ADMIN_ID)
+		{
+			curAdm = CreateAdmin();
+			// That should never happen!
+			if (!BindAdminIdentity(curAdm, "steam", authid))
+			{
+				LogToFile(logFile, "Unable to bind perks to identity %s", authid);
+				RemoveAdmin(curAdm);
+				continue;
+			}
+		}
+		
+		curAdm.InheritGroup(perkGroups[groupid]);
+		++usersWithPerks;
+		
+		#if defined DEBUG
+		LogToFile(logFile, "%s received %s", authid, GroupName[groupid]);
+		#endif
+	}
+	
 	--curLoading;
 	CheckLoadAdmins();
+	
+	#if defined DEBUG
+	LogToFile(logFile, "Finished loading %i perks.", usersWithPerks);
+	#endif
 }
 
 public GroupsDone(Handle:owner, Handle:hndl, const String:error[], any:data)

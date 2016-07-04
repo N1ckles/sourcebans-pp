@@ -233,3 +233,9 @@ CREATE TABLE IF NOT EXISTS `{prefix}_comms` (
   KEY `created` (`created`),
   KEY `aid` (`aid`)
 ) ENGINE=MyISAM  DEFAULT CHARSET=utf8;
+
+CREATE TABLE `{prefix}_perks` (
+  `steamid` varchar(55) NOT NULL,
+  `groupid` int(11) DEFAULT NULL,
+  PRIMARY KEY (`steamid`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8;
